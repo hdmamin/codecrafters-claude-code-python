@@ -14,7 +14,7 @@ class ToolRegistry:
 
     @classmethod
     def tool(cls, func: Callable):
-        cls[func.__name__] = func
+        cls.available[func.__name__] = func
 
         @wraps(func)
         def wrapped(*args, **kwargs):
