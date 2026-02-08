@@ -91,6 +91,7 @@ def main():
                     {
                         "role": "tool",
                         "content": results,
+                        "tool_call_id": tool.id,
                     }
                 )
                 print(results)
