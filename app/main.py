@@ -31,9 +31,14 @@ class ToolRegistry:
 
 
 @ToolRegistry.tool
-def Read(file_path: str):
+def Read(file_path: str) -> str:
     with open(file_path, "r") as f:
         return f.read()
+
+
+def Write(file_path: str, content: str) -> None:
+	with open(file_path, "w") as f:
+		f.write(content)
 
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -57,6 +62,27 @@ TOOLS = [
             }
         }
     },
+	{
+	"type": "function",
+	"function": {
+		"name": "Write",
+		"description": "Write content to a file",
+		"parameters": {
+		"type": "object",
+		"required": ["file_path", "content"],
+		"properties": {
+			"file_path": {
+			"type": "string",
+			"description": "The path of the file to write to"
+			},
+			"content": {
+			"type": "string",
+			"description": "The content to write to the file"
+			}
+		}
+		}
+	},
+	}
 ]
 
 def main():
