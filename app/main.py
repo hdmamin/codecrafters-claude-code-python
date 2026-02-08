@@ -78,7 +78,7 @@ def main():
     if not chat.choices or len(chat.choices) == 0:
         raise RuntimeError("no choices in response")
 
-    for tool in chat.choices[0]["message"]["tool_calls"]:
+    for tool in chat.choices[0].message.tool_calls:
         results = ToolRegistry.call_tool(
             tool["function"]["name"],
             json.loads(tool["arguments"])
