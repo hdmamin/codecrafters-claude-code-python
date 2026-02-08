@@ -81,7 +81,7 @@ def main():
     for tool in chat.choices[0].message.tool_calls:
         results = ToolRegistry.call_tool(
             tool.function.name,
-            json.loads(tool.arguments)
+            json.loads(tool.function.arguments)
         )
         print(results)
 
