@@ -81,7 +81,11 @@ def main():
             raise RuntimeError("no choices in response")
 
         messages.append(
-            {"role": "assistant", "content": chat.choices[0].message.content}
+            {
+                "role": "assistant",
+                "content": chat.choices[0].message.content,
+                "tool_calls": chat.choices[0].message.tool_calls,
+            }
         )
 
         tool_calls = chat.choices[0].message.tool_calls
