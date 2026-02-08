@@ -31,7 +31,7 @@ class ToolRegistry:
 
 
 @ToolRegistry.tool
-def read(file_path: str):
+def Read(file_path: str):
     with open(file_path, "r") as f:
         return f.read()
 
