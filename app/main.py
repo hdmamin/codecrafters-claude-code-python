@@ -80,6 +80,10 @@ def main():
         if not chat.choices or len(chat.choices) == 0:
             raise RuntimeError("no choices in response")
 
+        messages.append(
+            {"role": "assistant", "content": chat.choices[0].message.content}
+        )
+
         tool_calls = chat.choices[0].message.tool_calls
         if tool_calls:
             for tool in tool_calls:
@@ -96,9 +100,6 @@ def main():
                 )
                 print(results)
         else:
-            messages.append(
-                {"role": "assistant", "content": chat.choices[0].message.content}
-            )
             break
     print(chat.choices[0].message.content)
 
