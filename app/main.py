@@ -36,6 +36,7 @@ def Read(file_path: str) -> str:
         return f.read()
 
 
+@ToolRegistry.tool
 def Write(file_path: str, content: str) -> None:
 	with open(file_path, "w") as f:
 		f.write(content)
