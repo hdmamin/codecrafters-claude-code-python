@@ -69,25 +69,36 @@ def main():
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
-    chat = client.chat.completions.create(
-        model="anthropic/claude-haiku-4.5",
-        messages=[{"role": "user", "content": args.p}],
-        tools=TOOLS
-    )
-
-    if not chat.choices or len(chat.choices) == 0:
-        raise RuntimeError("no choices in response")
-
-    for tool in (chat.choices[0].message.tool_calls or []):
-        results = ToolRegistry.call_tool(
-            tool.function.name,
-            json.loads(tool.function.arguments)
+    messages = [{"role": "user", "content": args.p}]
+    while True:
+        chat = client.chat.completions.create(
+            model="anthropic/claude-haiku-4.5",
+            messages=messages,
+            tools=TOOLS
         )
-        print(results)
 
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!", file=sys.stderr)
+        if not chat.choices or len(chat.choices) == 0:
+            raise RuntimeError("no choices in response")
 
+        tool_calls = chat.choices[0].message.tool_calls
+        if tool_calls:
+            for tool in tool_calls:
+                results = ToolRegistry.call_tool(
+                    tool.function.name,
+                    json.loads(tool.function.arguments)
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": results,
+                    }
+                )
+                print(results)
+        else:
+            messages.append(
+                {"role": "assistant", "content": chat.choices[0].message.content}
+            )
+            break
     print(chat.choices[0].message.content)
 
 
