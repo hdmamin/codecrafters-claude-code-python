@@ -102,7 +102,6 @@ def main():
                         "tool_call_id": tool.id,
                     }
                 )
-                print(results)
         else:
             break
     print(chat.choices[0].message.content)
