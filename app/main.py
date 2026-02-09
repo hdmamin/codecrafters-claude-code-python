@@ -41,12 +41,14 @@ def Read(file_path: str) -> str:
 def Write(file_path: str, content: str) -> None:
     with open(file_path, "w") as f:
         f.write(content)
+    return content
 
 
 # TODO: add spec to tools array after Write stage passes
 @ToolRegistry.tool
 def Bash(command: str) -> str:
     res = subprocess.run(command.split())
+    # TODO: think codecrafters actually wants us to be a little more thoughtful about returning stdout and/or stderr, see instructions
     return res.stdout
 
 
@@ -115,15 +117,18 @@ def main():
         if not chat.choices or len(chat.choices) == 0:
             raise RuntimeError("no choices in response")
 
+        tool_calls = chat.choices[0].message.tool_calls
+        # TODO: getting 500 errors from openai and I think this is the likely cause.
+        # Need to see what messages array looks like as it grows, find expected vals and compare
         messages.append(
             {
                 "role": "assistant",
+                # TODO: unclear if this is right? cc example shows it as null when tool_calls is not none
                 "content": chat.choices[0].message.content,
                 "tool_calls": chat.choices[0].message.tool_calls,
             }
         )
 
-        tool_calls = chat.choices[0].message.tool_calls
         if tool_calls:
             for tool in tool_calls:
                 results = ToolRegistry.call_tool(
