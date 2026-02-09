@@ -33,23 +33,24 @@ class ToolRegistry:
 
 @ToolRegistry.tool
 def Read(file_path: str) -> str:
+    """Read text from a file."""
     with open(file_path, "r") as f:
         return f.read()
 
 
 @ToolRegistry.tool
 def Write(file_path: str, content: str) -> None:
+    """Write text to a file."""
     with open(file_path, "w") as f:
         f.write(content)
     return content
 
 
-# TODO: add spec to tools array after Write stage passes
 @ToolRegistry.tool
 def Bash(command: str) -> str:
-    res = subprocess.run(command.split())
-    # TODO: think codecrafters actually wants us to be a little more thoughtful about returning stdout and/or stderr, see instructions
-    return res.stdout
+    """Run a bash command."""
+    res = subprocess.run(command.split(), stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    return res.stderr or res.stdout
 
 
 API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -62,39 +63,57 @@ TOOLS = [
             "name": "Read",
             "description": "Read and return the contents of a file",
             "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                "type": "string",
-                "description": "The path to the file to read"
-                }
-            },
-            "required": ["file_path"]
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                    "type": "string",
+                    "description": "The path to the file to read"
+                    }
+                },
+                "required": ["file_path"]
             }
         }
     },
     {
-    "type": "function",
-    "function": {
-        "name": "Write",
-        "description": "Write content to a file",
-        "parameters": {
-        "type": "object",
-        "required": ["file_path", "content"],
-        "properties": {
-            "file_path": {
-            "type": "string",
-            "description": "The path of the file to write to"
-            },
-            "content": {
-            "type": "string",
-            "description": "The content to write to the file"
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write content to a file",
+            "parameters": {
+                "type": "object",
+                "required": ["file_path", "content"],
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path of the file to write to"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file"
+                    }
+                }
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute"
+                    }
+                }
+            }
         }
     },
-    }
 ]
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -118,12 +137,10 @@ def main():
             raise RuntimeError("no choices in response")
 
         tool_calls = chat.choices[0].message.tool_calls
-        # TODO: getting 500 errors from openai and I think this is the likely cause.
         # Need to see what messages array looks like as it grows, find expected vals and compare
         messages.append(
             {
                 "role": "assistant",
-                # TODO: unclear if this is right? cc example shows it as null when tool_calls is not none
                 "content": chat.choices[0].message.content,
                 "tool_calls": chat.choices[0].message.tool_calls,
             }
