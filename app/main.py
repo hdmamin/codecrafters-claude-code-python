@@ -169,6 +169,50 @@ def format_skill_frontmatters(skills: dict[str, dict]) -> str:
     return "\n".join(f"- {name}: {skill['description']}" for name, skill in skills.items())
 
 
+def parse_skill_invocation(message: str) -> dict:
+    """Parse a user's skill invocation command like:
+
+    /review foo bar
+
+    into a dict like:
+
+    {
+        "skill": "review",
+        "args": {
+            "$ARGUMENTS": "foo bar",
+            "$0": "foo",
+            "$ARGUMENTS[0]": "foo",
+            "$1": "bar",
+            "$ARGUMENTS[1]": "bar",
+        }
+    }
+    """
+    skill, *args = message.split(" ")
+    res = {
+        "skill": skill.lstrip("/"),
+        "args": {
+            "$ARGUMENTS": " ".join(args),
+        }
+    }
+    for i, arg in enumerate(args):
+        res["args"][f"${i}"] = arg
+        res["args"][f"$ARGUMENTS[{i}]"] = arg
+    return res
+
+
+def render_skill(invocation: str, skills: dict) -> str:
+    """
+    Args:
+        invocation: str input by the user to invoke a skill, e.g. `/review foo bar`
+        skills: dict returned by load_skills containing each skill's content, description, etc
+    """
+    info = parse_skill_invocation(invocation)
+    template = skills[info["skill"]]["content"]
+    for k, v in info["args"].items():
+        template = template.replace(k, v)
+    return template
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("-p", required=True)
@@ -181,8 +225,8 @@ def main():
 
     skills = load_skills()
     skill_frontmatters = format_skill_frontmatters(skills)
-    if args.p.startswith("/") and args.p[1:] in skills:
-        user_content = skills[args.p[1:]]["content"]
+    if args.p.startswith("/") and args.p[1:].split(" ")[0] in skills:
+        user_content = render_skill(args.p, skills)
     else:
         user_content = args.p
 
