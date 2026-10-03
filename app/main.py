@@ -156,7 +156,7 @@ def load_skills(skill_dir: str = SKILL_DIR) -> dict:
                     res[frontmatter["name"]] = {
                         "description": frontmatter["description"],
                         "content": content.split("---", 2)[-1].strip(),
-                        "file_path": file_path,
+                        "file_path": str(file_path),
                     }
                 except Exception as e:
                     logger.warning(
@@ -182,7 +182,7 @@ def main():
     skills = load_skills()
     skill_frontmatters = format_skill_frontmatters(skills)
     if args.p.startswith("/") and args.p[1:] in skills:
-        user_content = skills[args.p[1:]]
+        user_content = skills[args.p[1:]]["content"]
     else:
         user_content = args.p
 
