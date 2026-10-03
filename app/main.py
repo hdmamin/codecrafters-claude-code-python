@@ -1,12 +1,19 @@
 import argparse
 from functools import wraps
 import json
+import logging
 import os
+from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Callable
 
 from openai import OpenAI
+
+
+logger = logging.getLogger()
+logging.basicConfig(level=logging.INFO)
 
 
 class ToolRegistry:
@@ -115,6 +122,41 @@ TOOLS = [
 ]
 
 
+def load_skill_info(skill_dir: str = ".claude/skills", as_str: bool = True) -> str | list[dict]:
+    """
+    Returns
+        list of frontmatter dicts containingn keys "name" and "description" if as_str=False.
+        If as_str=True, we stringify this into a bulleted list.
+    """
+    frontmatters = []
+    skill_dir = Path(skill_dir).expanduser()
+    if not skill_dir.exists():
+        return "" if as_str else []
+
+    for path in skill_dir.iterdir():
+        if path.is_dir():
+            with open(path/"SKILL.md", "r") as f:
+                content = f.read()
+                try:
+                    frontmatter = re.findall(r"(?<=---\n).*(?=\n---\n)", content, re.DOTALL)
+                    if len(frontmatter) != 1:
+                        raise ValueError(
+                            f"Expected 1 frontmatter, found {len(frontmatter)}: {frontmatter}"
+                        )
+                    frontmatter = dict(line.split(": ") for line in frontmatter[0].splitlines())
+                    if any(key not in frontmatter for key in ("name", "description")):
+                        raise ValueError("Frontmatter did not contain all expected keys.")
+                except Exception as e:
+                    logger.warning(
+                        f"frontmatter parsing failed for skill {path/'SKILL.md'}: {e}"
+                    )    
+                else:
+                    frontmatters.append(frontmatter)
+    if as_str:
+        return "\n".join(f"- {f['name']}: {f['description']}" for f in frontmatters)
+    return frontmatters
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("-p", required=True)
@@ -125,7 +167,11 @@ def main():
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
-    messages = [{"role": "user", "content": args.p}]
+    skill_info = load_skill_info(as_str=True)
+    messages = [
+        {"role": "system", "content": f"You have access to the following skills:\n\n{skill_info}"},
+        {"role": "user", "content": args.p},
+    ]
     while True:
         chat = client.chat.completions.create(
             model="anthropic/claude-haiku-4.5",
