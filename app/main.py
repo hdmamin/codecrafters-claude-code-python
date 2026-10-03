@@ -15,6 +15,8 @@ from openai import OpenAI
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+SKILL_DIR = ".claude/skills"
+
 
 class ToolRegistry:
 
@@ -122,20 +124,23 @@ TOOLS = [
 ]
 
 
-def load_skill_info(skill_dir: str = ".claude/skills", as_str: bool = True) -> str | list[dict]:
+def load_skills(skill_dir: str = SKILL_DIR) -> dict:
     """
     Returns
-        list of frontmatter dicts containingn keys "name" and "description" if as_str=False.
-        If as_str=True, we stringify this into a bulleted list.
+        dict mapping skill name (str) to dict with keys:
+            frontmatter 
+            description
+            path
     """
-    frontmatters = []
+    res = {}
     skill_dir = Path(skill_dir).expanduser()
     if not skill_dir.exists():
-        return "" if as_str else []
+        return res
 
     for path in skill_dir.iterdir():
         if path.is_dir():
-            with open(path/"SKILL.md", "r") as f:
+            file_path = path/"SKILL.md"
+            with open(file_path, "r") as f:
                 content = f.read()
                 try:
                     frontmatter = re.findall(r"(?<=---\n).*(?=\n---\n)", content, re.DOTALL)
@@ -143,18 +148,25 @@ def load_skill_info(skill_dir: str = ".claude/skills", as_str: bool = True) -> s
                         raise ValueError(
                             f"Expected 1 frontmatter, found {len(frontmatter)}: {frontmatter}"
                         )
+
                     frontmatter = dict(line.split(": ") for line in frontmatter[0].splitlines())
                     if any(key not in frontmatter for key in ("name", "description")):
                         raise ValueError("Frontmatter did not contain all expected keys.")
+
+                    res[frontmatter["name"]] = {
+                        "description": frontmatter["description"],
+                        "content": content.split("---", 2)[-1].strip(),
+                        "file_path": file_path,
+                    }
                 except Exception as e:
                     logger.warning(
                         f"frontmatter parsing failed for skill {path/'SKILL.md'}: {e}"
                     )    
-                else:
-                    frontmatters.append(frontmatter)
-    if as_str:
-        return "\n".join(f"- {f['name']}: {f['description']}" for f in frontmatters)
-    return frontmatters
+    return res
+
+
+def format_skill_frontmatters(skills: dict[str, dict]) -> str:
+    return "\n".join(f"- {name}: {skill['description']}" for name, skill in skills.items())
 
 
 def main():
@@ -167,10 +179,21 @@ def main():
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
-    skill_info = load_skill_info(as_str=True)
+    skills = load_skills()
+    skill_frontmatters = format_skill_frontmatters(skills)
+    if args.p.startswith("/") and args.p[1:] in skills:
+        user_content = skills[args.p[1:]]
+    else:
+        user_content = args.p
+
     messages = [
-        {"role": "system", "content": f"You have access to the following skills:\n\n{skill_info}"},
-        {"role": "user", "content": args.p},
+        {
+            "role": "system",
+            "content": f"You have access to the following skills:\n\n{skill_frontmatters}"
+        },
+        {
+            "role": "user", "content": user_content
+        },
     ]
     while True:
         chat = client.chat.completions.create(
