@@ -169,7 +169,14 @@ def format_skill_frontmatters(skills: dict[str, dict]) -> str:
     return "\n".join(f"- {name}: {skill['description']}" for name, skill in skills.items())
 
 
-def parse_skill_invocation(message: str) -> dict:
+def is_skill_invocation(message: str, skills: dict) -> bool:
+    """Return true if a user message invokes as skill (e.g. `/foo bar` where foo is a skill),
+    False otherwise.
+    """
+    return message.startswith("/") and message[1:].split(" ")[0] in skills
+
+
+def parse_skill_invocation(message: str, skills: dict) -> list[dict]:
     """Parse a user's skill invocation command like:
 
     /review foo bar
@@ -186,31 +193,49 @@ def parse_skill_invocation(message: str) -> dict:
             "$ARGUMENTS[1]": "bar",
         }
     }
+
+    We return a list of these skill dicts in the order they are invoked.
     """
-    skill, *args = message.split(" ")
-    res = {
-        "skill": skill.lstrip("/"),
-        "args": {
-            "$ARGUMENTS": " ".join(args),
+    words = message.split(" ")
+    skill_names = []
+    for i, word in enumerate(words):
+        if word.startswith("/") and word[1:] in skills:
+            skill_names.append(word[1:])
+        else:
+            args = words[i:]
+            break
+    else:
+        args = []
+
+    res = []
+    for name in skill_names:
+        cur = {
+            "skill": name.lstrip("/"),
+            "args": {
+                "$ARGUMENTS": " ".join(args),
+            }
         }
-    }
-    for i, arg in enumerate(args):
-        res["args"][f"${i}"] = arg
-        res["args"][f"$ARGUMENTS[{i}]"] = arg
+        for i, arg in enumerate(args):
+            cur["args"][f"${i}"] = arg
+            cur["args"][f"$ARGUMENTS[{i}]"] = arg
+        res.append(cur)
     return res
 
 
-def render_skill(invocation: str, skills: dict) -> str:
+def render_skill_messages(invocation: str, skills: dict) -> list[dict[str, str]]:
     """
     Args:
         invocation: str input by the user to invoke a skill, e.g. `/review foo bar`
         skills: dict returned by load_skills containing each skill's content, description, etc
     """
-    info = parse_skill_invocation(invocation)
-    template = skills[info["skill"]]["content"]
-    for k, v in info["args"].items():
-        template = template.replace(k, v)
-    return template
+    skill_infos = parse_skill_invocation(invocation, skills)
+    templates = []
+    for info in skill_infos:
+        template = skills[info["skill"]]["content"]
+        for k, v in info["args"].items():
+            template = template.replace(k, v)
+        templates.append({"role": "user", "content": template})
+    return templates
 
 
 def main():
@@ -225,19 +250,17 @@ def main():
 
     skills = load_skills()
     skill_frontmatters = format_skill_frontmatters(skills)
-    if args.p.startswith("/") and args.p[1:].split(" ")[0] in skills:
-        user_content = render_skill(args.p, skills)
+    if is_skill_invocation(args.p, skills):
+        user_content = render_skill_messages(args.p, skills)
     else:
-        user_content = args.p
+        user_content = [{"role": "user", "content": args.p}]
 
     messages = [
         {
             "role": "system",
             "content": f"You have access to the following skills:\n\n{skill_frontmatters}"
         },
-        {
-            "role": "user", "content": user_content
-        },
+        *user_content
     ]
     while True:
         chat = client.chat.completions.create(
