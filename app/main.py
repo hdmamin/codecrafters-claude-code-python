@@ -37,7 +37,11 @@ class ToolRegistry:
             tool = cls.available[name]
         except KeyError as e:
             raise ValueError(f"tool {name!r} not found.")
-        return tool(**arguments)
+
+        try:
+            return tool(**arguments)
+        except Exception as e:
+            return f"FailedToolCall({str(e)})"
 
 
 @ToolRegistry.tool
