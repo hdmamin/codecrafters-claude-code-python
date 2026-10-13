@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Callable
+from typing import Callable, Optional
 
 from openai import OpenAI
 
@@ -18,125 +18,13 @@ logging.basicConfig(level=logging.INFO)
 SKILL_DIR = ".claude/skills"
 
 
-class ToolRegistry:
-
-    available = {}
-
-    @classmethod
-    def tool(cls, func: Callable):
-        cls.available[func.__name__] = func
-
-        @wraps(func)
-        def wrapped(*args, **kwargs):
-            return func(*args, **kwargs)
-        return wrapped
-
-    @classmethod
-    def call_tool(cls, name: str, arguments: dict):
-        try:
-            tool = cls.available[name]
-        except KeyError as e:
-            raise ValueError(f"tool {name!r} not found.")
-
-        try:
-            return tool(**arguments)
-        except Exception as e:
-            return f"FailedToolCall({str(e)})"
-
-
-@ToolRegistry.tool
-def Read(file_path: str) -> str:
-    """Read text from a file."""
-    with open(file_path, "r") as f:
-        return f.read()
-
-
-@ToolRegistry.tool
-def Write(file_path: str, content: str) -> None:
-    """Write text to a file."""
-    with open(file_path, "w") as f:
-        f.write(content)
-    return content
-
-
-@ToolRegistry.tool
-def Bash(command: str) -> str:
-    """Run a bash command."""
-    res = subprocess.run(
-        command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, shell=True
-    )
-    return res.stderr or res.stdout
-
-
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
-
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "Read",
-            "description": "Read and return the contents of a file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                    "type": "string",
-                    "description": "The path to the file to read. You cannot run "
-                                   "this on directories!"
-                    }
-                },
-                "required": ["file_path"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Write",
-            "description": "Write content to a file",
-            "parameters": {
-                "type": "object",
-                "required": ["file_path", "content"],
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "The path of the file to write to"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "The content to write to the file"
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Bash",
-            "description": "Execute a shell command",
-            "parameters": {
-                "type": "object",
-                "required": ["command"],
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The command to execute"
-                    }
-                }
-            }
-        }
-    },
-]
-
-
 def load_skills(skill_dir: str = SKILL_DIR) -> dict:
     """
     Returns
         dict mapping skill name (str) to dict with keys:
             frontmatter 
             description
+            content
             file_path
             path
     """
@@ -260,6 +148,151 @@ def render_skill_messages(invocation: str, skills: dict) -> list[dict[str, str]]
     return templates
 
 
+SKILLS = load_skills()
+SKILL_FRONTMATTERS = format_skill_frontmatters(SKILLS)
+
+
+class ToolRegistry:
+
+    available = {}
+
+    @classmethod
+    def tool(cls, func: Callable):
+        cls.available[func.__name__] = func
+
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            return func(*args, **kwargs)
+        return wrapped
+
+    @classmethod
+    def call_tool(cls, name: str, arguments: dict):
+        try:
+            tool = cls.available[name]
+        except KeyError as e:
+            raise ValueError(f"tool {name!r} not found.")
+
+        try:
+            return tool(**arguments)
+        except Exception as e:
+            return f"FailedToolCall({str(e)})"
+
+
+@ToolRegistry.tool
+def Read(file_path: str) -> str:
+    """Read text from a file."""
+    with open(file_path, "r") as f:
+        return f.read()
+
+
+@ToolRegistry.tool
+def Write(file_path: str, content: str) -> None:
+    """Write text to a file."""
+    with open(file_path, "w") as f:
+        f.write(content)
+    return content
+
+
+@ToolRegistry.tool
+def Bash(command: str) -> str:
+    """Run a bash command."""
+    res = subprocess.run(
+        command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, shell=True
+    )
+    return res.stderr or res.stdout
+
+
+@ToolRegistry.tool
+def Skill(name: str, args: Optional[list[str]] = None):
+    """
+    Args:
+        name: Name of the skill to use.
+        args: Optional args to hydrate the skill prompt.
+    """
+    skill = SKILLS[name]
+    return skill["content"].format(*args)
+
+
+API_KEY = os.getenv("OPENROUTER_API_KEY")
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "Read",
+            "description": "Read and return the contents of a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                    "type": "string",
+                    "description": "The path to the file to read. You cannot run "
+                                   "this on directories!"
+                    }
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write content to a file",
+            "parameters": {
+                "type": "object",
+                "required": ["file_path", "content"],
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path of the file to write to"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Skill",
+            "description": "Load a skill's instructions into the conversation",
+            "parameters": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                "name": { "type": "string", "description": "The name of the skill to use"},
+                "args": { "type": "string", "description": "Optional arguments for the skill" }
+                }
+            }
+        }
+    },
+]
+
+
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("-p", required=True)
@@ -270,17 +303,17 @@ def main():
 
     client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
-    skills = load_skills()
-    skill_frontmatters = format_skill_frontmatters(skills)
-    if is_skill_invocation(args.p, skills):
-        user_content = render_skill_messages(args.p, skills)
+    if is_skill_invocation(args.p, SKILLS):
+        user_content = render_skill_messages(args.p, SKILLS)
     else:
         user_content = [{"role": "user", "content": args.p}]
 
     messages = [
         {
             "role": "system",
-            "content": f"You have access to the following skills:\n\n{skill_frontmatters}"
+            "content": f"You have access to the following skills:\n\n{SKILL_FRONTMATTERS}"
+                       "If a skill matches the user's request, call the Skill tool with its name "
+                       "and follow the instructions it returns."
         },
         *user_content
     ]
