@@ -58,7 +58,9 @@ def Write(file_path: str, content: str) -> None:
 @ToolRegistry.tool
 def Bash(command: str) -> str:
     """Run a bash command."""
-    res = subprocess.run(command.split(), stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    res = subprocess.run(
+        command, stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True, shell=True
+    )
     return res.stderr or res.stdout
 
 
@@ -76,7 +78,8 @@ TOOLS = [
                 "properties": {
                     "file_path": {
                     "type": "string",
-                    "description": "The path to the file to read"
+                    "description": "The path to the file to read. You cannot run "
+                                   "this on directories!"
                     }
                 },
                 "required": ["file_path"]
@@ -130,6 +133,7 @@ def load_skills(skill_dir: str = SKILL_DIR) -> dict:
         dict mapping skill name (str) to dict with keys:
             frontmatter 
             description
+            file_path
             path
     """
     res = {}
@@ -157,6 +161,7 @@ def load_skills(skill_dir: str = SKILL_DIR) -> dict:
                         "description": frontmatter["description"],
                         "content": content.split("---", 2)[-1].strip(),
                         "file_path": str(file_path),
+                        "path": str(file_path.parent)
                     }
                 except Exception as e:
                     logger.warning(
@@ -166,7 +171,10 @@ def load_skills(skill_dir: str = SKILL_DIR) -> dict:
 
 
 def format_skill_frontmatters(skills: dict[str, dict]) -> str:
-    return "\n".join(f"- {name}: {skill['description']}" for name, skill in skills.items())
+    return "\n".join(
+        f"- {name}: {skill['description']}"
+        for name, skill in skills.items()
+    )
 
 
 def is_skill_invocation(message: str, skills: dict) -> bool:
@@ -228,13 +236,23 @@ def render_skill_messages(invocation: str, skills: dict) -> list[dict[str, str]]
         invocation: str input by the user to invoke a skill, e.g. `/review foo bar`
         skills: dict returned by load_skills containing each skill's content, description, etc
     """
+    path_info = (
+        "Skill: {name} (located at {path})\nPaths in the instructions below are relative to that "
+        "folder. Skill contents have been injected below.\n\n"
+    )
     skill_infos = parse_skill_invocation(invocation, skills)
     templates = []
     for info in skill_infos:
-        template = skills[info["skill"]]["content"]
+        skill = skills[info["skill"]]
+        template = skill["content"]
         for k, v in info["args"].items():
             template = template.replace(k, v)
-        templates.append({"role": "user", "content": template})
+        templates.append(
+            {
+                "role": "user",
+                "content": path_info.format(name=info["skill"], path=skill["path"]) + template
+            }
+        )
     return templates
 
 
@@ -262,6 +280,9 @@ def main():
         },
         *user_content
     ]
+    # TODO: investigate why agent is apparently trying to read/write/run 'cd' as a file. Must be
+    # gettingn confused by something about my path injection info, even though on first glance
+    # it looks right to my eyes.
     while True:
         chat = client.chat.completions.create(
             model="anthropic/claude-haiku-4.5",
@@ -284,6 +305,9 @@ def main():
 
         if tool_calls:
             for tool in tool_calls:
+                # if tool.function.name.lower() == "read":
+                #     print(messages)
+                #     print(vars(tool)) # TODO rm
                 results = ToolRegistry.call_tool(
                     tool.function.name,
                     json.loads(tool.function.arguments)
