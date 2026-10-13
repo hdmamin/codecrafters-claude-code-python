@@ -15,7 +15,84 @@ from openai import OpenAI
 logger = logging.getLogger()
 logging.basicConfig(level=logging.INFO)
 
+API_KEY = os.getenv("OPENROUTER_API_KEY")
+BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
+client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+
 SKILL_DIR = ".claude/skills"
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "Read",
+            "description": "Read and return the contents of a file",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                    "type": "string",
+                    "description": "The path to the file to read. You cannot run "
+                                   "this on directories!"
+                    }
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Write",
+            "description": "Write content to a file",
+            "parameters": {
+                "type": "object",
+                "required": ["file_path", "content"],
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "The path of the file to write to"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Execute a shell command",
+            "parameters": {
+                "type": "object",
+                "required": ["command"],
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to execute"
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "Skill",
+            "description": "Load a skill's instructions into the conversation",
+            "parameters": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                "name": { "type": "string", "description": "The name of the skill to use"},
+                "args": { "type": "string", "description": "Optional arguments for the skill" }
+                }
+            }
+        }
+    },
+]
 
 
 def load_skills(skill_dir: str = SKILL_DIR) -> dict:
@@ -50,6 +127,7 @@ def load_skills(skill_dir: str = SKILL_DIR) -> dict:
                         raise ValueError("Frontmatter did not contain all expected keys.")
 
                     res[frontmatter["name"]] = {
+                        "frontmatter": frontmatter,
                         "description": frontmatter["description"],
                         "content": content.split("---", 2)[-1].strip(),
                         "file_path": str(file_path),
@@ -148,6 +226,48 @@ def render_skill_messages(invocation: str, skills: dict) -> list[dict[str, str]]
     return templates
 
 
+def agent_loop(messages: list[str]) -> str:
+    """
+    messages gets modified during the function call and these changes persist outside it.
+    """
+    while True:
+        chat = client.chat.completions.create(
+            model="anthropic/claude-haiku-4.5",
+            messages=messages,
+            tools=TOOLS
+        )
+
+        if not chat.choices or len(chat.choices) == 0:
+            raise RuntimeError("no choices in response")
+
+        tool_calls = chat.choices[0].message.tool_calls
+        # Need to see what messages array looks like as it grows, find expected vals and compare
+        messages.append(
+            {
+                "role": "assistant",
+                "content": chat.choices[0].message.content,
+                "tool_calls": chat.choices[0].message.tool_calls,
+            }
+        )
+
+        if tool_calls:
+            for tool in tool_calls:
+                results = ToolRegistry.call_tool(
+                    tool.function.name,
+                    json.loads(tool.function.arguments)
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": results,
+                        "tool_call_id": tool.id,
+                    }
+                )
+        else:
+            break
+    return chat.choices[0].message.content
+
+
 SKILLS = load_skills()
 SKILL_FRONTMATTERS = format_skill_frontmatters(SKILLS)
 
@@ -209,88 +329,20 @@ def Skill(name: str, args: Optional[list[str]] = None):
         name: Name of the skill to use.
         args: Optional args to hydrate the skill prompt.
     """
+    args = args or []
     skill = SKILLS[name]
-    return skill["content"].format(*args)
+    content = skill["content"].format(*args)
+    if skill["frontmatter"].get("context", None) != "fork":
+        return content
 
-
-API_KEY = os.getenv("OPENROUTER_API_KEY")
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", default="https://openrouter.ai/api/v1")
-
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "Read",
-            "description": "Read and return the contents of a file",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                    "type": "string",
-                    "description": "The path to the file to read. You cannot run "
-                                   "this on directories!"
-                    }
-                },
-                "required": ["file_path"]
-            }
+    # Execute in subagent.
+    result = agent_loop([
+        {
+            "role": "user",
+            "content": content,
         }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Write",
-            "description": "Write content to a file",
-            "parameters": {
-                "type": "object",
-                "required": ["file_path", "content"],
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "The path of the file to write to"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "The content to write to the file"
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Bash",
-            "description": "Execute a shell command",
-            "parameters": {
-                "type": "object",
-                "required": ["command"],
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The command to execute"
-                    }
-                }
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Skill",
-            "description": "Load a skill's instructions into the conversation",
-            "parameters": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                "name": { "type": "string", "description": "The name of the skill to use"},
-                "args": { "type": "string", "description": "Optional arguments for the skill" }
-                }
-            }
-        }
-    },
-]
-
-
+    ])
+    return f"Skill apple ran in a separate context and returned: {result}"
 
 
 def main():
@@ -300,8 +352,6 @@ def main():
 
     if not API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
-
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
 
     if is_skill_invocation(args.p, SKILLS):
         user_content = render_skill_messages(args.p, SKILLS)
@@ -317,48 +367,8 @@ def main():
         },
         *user_content
     ]
-    # TODO: investigate why agent is apparently trying to read/write/run 'cd' as a file. Must be
-    # gettingn confused by something about my path injection info, even though on first glance
-    # it looks right to my eyes.
-    while True:
-        chat = client.chat.completions.create(
-            model="anthropic/claude-haiku-4.5",
-            messages=messages,
-            tools=TOOLS
-        )
-
-        if not chat.choices or len(chat.choices) == 0:
-            raise RuntimeError("no choices in response")
-
-        tool_calls = chat.choices[0].message.tool_calls
-        # Need to see what messages array looks like as it grows, find expected vals and compare
-        messages.append(
-            {
-                "role": "assistant",
-                "content": chat.choices[0].message.content,
-                "tool_calls": chat.choices[0].message.tool_calls,
-            }
-        )
-
-        if tool_calls:
-            for tool in tool_calls:
-                # if tool.function.name.lower() == "read":
-                #     print(messages)
-                #     print(vars(tool)) # TODO rm
-                results = ToolRegistry.call_tool(
-                    tool.function.name,
-                    json.loads(tool.function.arguments)
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "content": results,
-                        "tool_call_id": tool.id,
-                    }
-                )
-        else:
-            break
-    print(chat.choices[0].message.content)
+    response = agent_loop(messages)
+    print(response)
 
 
 if __name__ == "__main__":
